@@ -1,0 +1,306 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+---
+title: "PROJET SERIE CHRONOLOGIQUE"
+author: "NABIL MARHAR, HARON REZGUI & AYMAN YAYA"
+date: '2023-04-20'
+output:
+  pdf_document: 
+    fig_caption: yes
+    fig_crop: false
+    fig_height: 4
+    fig_width: 6
+  html_document: default
+---
+# PARTIE 1
+
+```{r}
+library(tseries)
+library(rugarch)
+library(tidyverse)
+library(reshape2)
+```
+1.Charger les données dans R puis représenter les données contenues dans l’objet intitulé "Sinistres".
+```{r}
+#Lecture des données
+data <- load("C:/Users/HP/Downloads/Sinistres.Rdata")
+Series <- plot(Sinistres)
+```
+
+
+2. Séparer les données en deux parties : On considère h = 12 et n la taille de la série. Créer deux variables de type ts. La première appellée X contenant les n-h premières valeurs de la série. La deuxième appelée Xfutur contenant les h dernières valeurs de la série. (Attention à bien faire commencer Xfutur au bon pas de temps).
+
+```{r}
+n <- length(Sinistres) 
+h <- 12
+X <- ts(Sinistres[1:(n-h)], start = c(1990, 1), frequency = 12)
+plot(X)
+Xfutur <- ts(Sinistres[(n-h+1):n], start = c(2022, 1), frequency = 12)
+```
+
+
+3. Représenter sur le même graphique et dans des couleurs différentes X et Xfutur. 
+Ainsi on isole toute les données correspondant à l’année 2022 et on va tenter de les "retrouver" en modélisant X et en prédisant les h valeurs suivantes de la série.
+```{r}
+plot(X, col = "blue", main = "Séries temporelles X et Xfutur")
+lines(Xfutur, col = "red")
+legend("topleft", legend=c("X", "Xfutur"), col=c("blue", "red"), lty=1)
+```
+
+4. Transformer X pour le mettre sous forme additive. appelons gX cette transformation.
+```{r}
+source("boxcox.r")
+a=0.1
+gX=boxcox(X,a)
+plot(gX,main="Transformation de X en gX à l'aide de boxcox") 
+```
+
+5. Estimer la tendance de gX. Représenter gX et sa tendance sur le même graphique.
+```{r}
+gX=boxcox(X,a)
+T1=time(gX)
+gX.trend=lm(gX~I(T1)+I(T1^2)+I(T1^4))
+tendance_gX=gX.trend$fitted.values
+gX=ts(gX,start=c(1990,1),frequency=12)
+summary (gX.trend) 
+ts.plot (tendance_gX,gX,col=c("red","black"),main="gX et l'estimation de la tendance") 
+```
+
+
+6. Creer gX.detend la série gX moins la tendance.
+```{r}
+gX.detend <- gX - tendance_gX
+plot(gX.detend)
+```
+
+7. Supprimer la composante saisonniaire en différentiant suffisamment de fois au lag12. On note gX.statio la série obtenue.
+```{r}
+gX.stat <- diff(gX.detend)
+gX.stati <- diff(gX.stat, lag=12)
+gX.statio <- diff(gX.stati, lag=12)
+plot(gX.statio)
+```
+
+8. Dire si la série gX.statio est stationnaire
+```{r}
+acf(gX.statio , lag=50) 
+pacf(gX.statio, lag=50)
+```
+Nous constatons la stationnarité de la tendance (gX). En effet, aucun phénomène de saisonnalité n’est à souligner sur le premier graphique. Le graphique comportant l’ACF ne dégage aucun signe notable de périodicité. Quant au modèle ARMA, grâce à la PACF, j’ai déterminé p=5 pour le AR. Pour le MA, j’ai q=3 en se basant sur l’ACF.
+
+9. Ajuster un modèle ARMA sur la série gX.statio. Que valent p, q et les paramètres du modèle ?
+```{r}
+source("armaic.r")
+L = armaic(gX.statio,M=8,include.mean=FALSE)
+L
+```
+
+10. Analyser les résidus du modèle.
+```{r}
+out.gX.statio=L$model
+z=out.gX.statio$residuals
+plot(z) 
+
+acf(z)
+pacf(z)
+
+p=5
+q=2
+
+Box.test(z,type = "Ljung-Box",fitdf = p + q+1,lag=10)
+```
+Aucune trace d’autocorrélation des résidus des résidus n’est constatée sur le premier graphique. Afin d’aller plus loin dans l’analyse des résidus, nous avons réalisé une ACF ainsi qu’une PACF (de la manière que la question 9). 
+L’ACF et la PACF nous ont permis de confirmer quauncune autocorrélation n’est à souligner. En effet, aucun pic ne dépasse les limitations représentées par les pointillés bleues.
+Procédons maintenant au test de Box-Ljung :
+Pour cela, nous déterminons : 
+- H0, l’hypothèse selon laquelle les résidus sont indépendants
+-	H1, l’hypothèse selon laquelle les résidus sont dépendants entre eux (l’hypothèse inverse de H0)
+Si la p-value est inférieure au test de significativité (ici 5%), alors H0 est rejetée et il y a donc dépendance des résidus. 
+Dans notre cas, la p-value est vaut 0.2486, l’hypothèse H0 est donc validée, il y a donc indépendance entre les résidus.
+
+11. Ajuster un modèle SARIMA sur la série gX.detend. On note out.detend ce modèle.
+```{r}
+library(forecast)
+
+out.detend <- auto.arima(gX.detend, seasonal=TRUE)
+out.detend
+
+```
+
+
+12. À l’aide de out.detend prédire les h prochaines valeurs de gX.detend.
+```{r}
+h=12
+predlist=predict(out.detend,n.ahead = h) 
+
+predsinlin=predlist$pred
+predsinlinUp = predsinlin + 1.96*predlist$se
+predsinlinLow = predsinlin - 1.96*predlist$se
+ts.plot(gX.detend,predsinlin,predsinlinUp,predsinlinLow, col=c("black","red","orange","orange"),lty =c(1,1,2,2),main= "Prédiction des H prochaines valeurs de gX.detend")
+
+gX=boxcox(X,a)
+T1=time(gX)
+gX.trend=lm(gX~I(T1)+I(T1^2)+I(T1^4))
+tendance_gX=gX.trend$fitted.values
+gX = ts(gX,start=c(1990,1) ,frequency=12)
+tendance_gX=ts(tendance_gX,start = c(1990,1),frequency=12)
+out.tendance=auto.arima(tendance_gX,seasonal = TRUE)
+h=12
+predlist2=predict (out.tendance,n.ahead=h)
+predlin2=predlist2$pred
+predlinup2=predlin2+1.96*predlist2$se
+predlinlow2=predlin2-1.96*predlist2$se
+ts.plot(tendance_gX,predlin2,predlinup2,predlinlow2,col=c("black","red","orange","orange"),lty=c(1,1,2,2),xlim=c(2020,2023)) 
+        
+
+```
+Ce graphique nous permet de souligner une continuité du phénomène saisonnier. En effet, pour la prédiction des h prochaines valeurs de gX.detend, nous obtenons à l’identique la même allure que celle  prise par les anciennes valeurs de cette même série.
+
+13. Ajouter la tendance à ces prédiction pour prédire les h prochaines valeurs de gX
+```{r}
+predlin=predsinlin+predlin2
+predlinup=predsinlinUp+predlinup2
+predlow=predsinlinLow+predlinlow2
+ts.plot(gX,predlin,predlinup,predlow,col=c("black","red","orange","orange"),lty=c(1,1,2,2))
+
+predlin=predsinlin+predlin2
+predlinup=predsinlinUp+predlinup2
+predlow=predsinlinLow+predlinlow2
+ts.plot(gX,predlin,predlinup,predlow,col=c("black","red","orange","orange"),lty=c(1,1,2,2),xlim=c(2020,2023))
+```
+Dans la continuité de notre pensée, une tendance croissante au niveau de la prédiction des prochaines valeurs de gX (en rouge ici) à l’instar de ses anciennes valeurs.
+
+
+14. Faire la transformation inverse de la question 4. pour construire un prédicteur des h prochaines valeurs
+de X.
+```{r}
+Pred = (predlin*a + 1)^(1/a)
+PredUp = (predlinup*a + 1)^(1/a)
+PredLow = (predlow*a+ 1)^(1/a) 
+
+```
+
+# PARTIE 2
+Nous étudions une base de données contenant les relevés quotidiens de température de la ville de Marignane sur les 13 dernières années. Il est alors intéréssant d'analyser ce jeu de données, de telle manière à observer la tendance et la saisonnalité de cette série chronologique, et ainsi pouvoir par la suite modéliser cette série qui nous permettra alors de comprendre et prédire le comportement de cette dernière au fil du temps.
+
+```{r, include=FALSE}
+
+library(ggplot2)
+library(dplyr)
+library(tidyverse)
+library(reshape2)
+library("forecast")
+```
+## 1°Analyse descriptive et quelques statistiques de notre jeu de données !
+```{r, echo=FALSE}
+Temp<- read.csv("temperature.csv",header=T,sep=",")
+Temp$Date <- as.Date(Temp$Date, format = "%Y-%m-%d")
+str(Temp) # visualiser la structure du fichier 
+head(Temp) # afficher les 10 premières observations
+summary(Temp) # résumer le fichier de données
+```
+
+Le jeu de données présente 2 variables: la date et la température journalière moyenne, et 4826 observations correspondant à toutes les températures mesurées à Marignane depuis le 1er Janvier 2010. Sur l'ensemble de cette période, une température moyenne a été constaté de 17,3°C avec minima de 4,8° et maxima de 29,1°.
+
+```{r}
+# transformation modèle additif
+
+Temp.ts=ts(Temp$mean.temp,start=c(2010,1,1),end=c(2023,3,19),frequency=365)
+source("boxcox.r")
+
+A = seq(0,0.5,0.1)
+n = length(Temp.ts)
+M = matrix(0,n,length(A))
+			
+for(i in (1:length(A))){
+		 M[,i] = boxcox(Temp.ts,A[i])
+}
+M = ts(M,start=c(2010,1,1),frequency=365)
+ts.plot(M, col=(1:length(A)))
+
+legend('topleft',legend=paste("a=",as.character(A),sep=""),col=(1:length(A)),lty = 1)
+```
+
+```{r}
+# Régression linéaire pour estimer la tendance
+TempTS = ts(Temp$mean.temp,start=c(2010,1),frequency=365)
+lm.TempTS = lm(TempTS ~ time(TempTS))
+plot(TempTS, main="TempTS")
+# lines( as.vector(time(TempTS)),lm.TempTS$fitted.values,col="blue")
+```
+
+Une erreur s'affichant, nous ne nous sommes pas parvenus à tracer la droite de régression d'ordre 1. Mais au vue du graphique nous pouvons dès lors supposer une tendance croissante avec un effet saisonnier annuel, avec un pic annuel avoisinant les 28°C. Cela correspond naturellement à la période estivale.
+
+
+```{r, echo=FALSE}
+plot(Temp)
+```
+Ci-dessus le nuage de points du jeu de données.
+
+```{r, echo=FALSE}
+acf(Temp)
+pacf(Temp)
+acf(Temp,lag.max=75) 
+pacf(Temp, lag.max=75)
+```
+
+L'ACF mesure la corrélation entre une observation de la série chronologique et ses observations passées à différents retards. Ici nous avons pris retard lag=75 L'ACF montre à quelle vitesse la corrélation décroît à mesure que le retard augmente. On observe que la corrélation décroît lentement, cela suggère qu'il y a une forte dépendance temporelle dans la série.
+La PACF, quant à elle, mesure la corrélation entre une observation de la série chronologique et une observation passée à un retard particulier (ici lag=75), en éliminant l'effet de toutes les observations intermédiaires.
+
+On voit alors que notre série présente une forte dépendance selon le temps.En effet, malgré des retards assez grands (resp. 30 et 75), la série présentent tout de même une corrélation importante entre ses observations. 
+
+Il est alors intéréssant de stationnariser la série chronologique afin de la transformer  en une série plus simple et régulière, ce qui facilitera son analyse et sa modélisation.
+
+## 2° Stationnarisation de la série
+
+```{r}
+Yd1 = diff(Temp$mean.temp) 
+plot(Yd1)
+acf(Yd1)  
+			
+Yd1ds1 =  diff(Yd1,lag=12)
+plot(Yd1ds1) 
+acf(Yd1ds1)
+			
+Yd1ds2 =  diff(Yd1ds1,lag=12)
+plot(Yd1ds2)  
+acf(Yd1ds2,lag=75)
+pacf(Yd1ds2,lag=75)
+		
+```
+
+Par la différenciation, nous pouvons alors étudier la stationnarisation de la série.
+On observe qu'au degré 2, nous ne sommes pas encore dans un état stationnaire. En observant l'AFC et le PAFC on retrouve encore des périodes dépassant les bornes stationnaires, mais les pics sont moins élevés désormais.
+Pour ajuster notre modèle ARMA d'ordre (p,q) où p (resp. q) sont les nombres de pics sur le graphique AFC (resp.  graphique PAFC), on a donc p=3 et q=6.
+
+```{r}
+source("armaic.r")
+
+A=armaic(Yd1ds2,M=9,include.mean=FALSE)
+A
+
+```
+On choisit ainsi le modèle ARMA (2,7), celui qui minimise un maximum l'AIC.
+
+```{r}
+out.Yd1ds2=A$model
+ResY=out.Yd1ds2$residuals
+p= 2
+q= 7
+Box.test(ResY,lag=10,type = "Ljung-Box") 
+```
+Ainsi, avec une p-value < 2.2e-16, on peut donc rejeter l'hypothèse H0 où le modèle serait stationnaire.
+
+```{r}
+out.Temp = arima(Temp$mean.temp,order=c(3,1,6),seasonal=list(order=c(0,2,0),period=12),include.mean = FALSE)
+H = 50
+predList = predict(out.Temp,n.ahead=H)
+predList
+
+```
+
+A partir du modèle ARMA,il nous est alors possible de prédire les 50 prochaines observations à l'aide de la fonction ARIMA.
+
+
